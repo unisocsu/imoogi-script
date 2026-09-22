@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pro Emoji & Text Shortcuts Replacer
 // @namespace    http://tampermonkey.net/
-// @version      2.2
-// @description  החלפת קיצורים לאימוג'ים, המרת מספרים למילים, תפריט סינון בזמן אמת, טקסטים דינמיים וחיפוש בהגדרות
+// @version      2.3
+// @description  החלפת קיצורים לאימוג'ים, המרת מספרים למילים (כולל עשרוניים), תפריט סינון בזמן אמת, טקסטים דינמיים וחיפוש בהגדרות
 // @author       You
 // @match        *://*/*
 // @grant        GM_getValue
@@ -28,7 +28,7 @@
 
         // סמלים ולבבות
         "/לב/": "❤️", "/לב_צהוב/": "💛", "/לב_ירוק/": "💚", "/אש/": "🔥",
-        "/כוכב/": "⭐", "/100/": "💯", "/וי/": "✅", "/איקס/": "❌",
+        "/כוכב/": "⭐", "מאה": "💯", "/וי/": "✅", "/איקס/": "❌",
         "/אזהרה/": "⚠️", "/שאלה/": "❓", "/קריאה/": "❗", "/פלאג/": "🔌",
         "/heart/": "❤️", "/fire/": "🔥", "/star/": "⭐",
 
@@ -62,11 +62,12 @@
     }
 
     // -------------------------------------------------------------
-    // המרת מספרים למילים בעברית (עד 999,999)
+    // המרת מספרים למילים בעברית (עד 999,999) כולל שברים עשרוניים
     // -------------------------------------------------------------
     function numberToWordsHebrew(num) {
-        if (num === 0) return "אפס";
+        num = parseInt(num, 10);
         if (isNaN(num) || num < 0 || num > 999999) return null;
+        if (num === 0) return "אפס";
 
         const units = ["", "אחד", "שניים", "שלושה", "ארבעה", "חמישה", "שישה", "שבעה", "שמונה", "תשעה"];
         const teens = ["עשר", "אחד עשר", "שניים עשר", "שלושה עשר", "ארבעה עשר", "חמישה עשר", "שישה עשר", "שבעה עשר", "שמונה עשר", "תשעה עשר"];
@@ -123,6 +124,17 @@
         return result.join(" ");
     }
 
+    function numberToWordsHebrewWithDecimals(inputStr) {
+        const parts = inputStr.split('.');
+        const intWords = numberToWordsHebrew(parts[0]);
+        
+        if (!intWords) return null;
+        if (parts.length === 1) return intWords;
+        
+        const decWords = numberToWordsHebrew(parts[1]);
+        return decWords ? `${intWords} נקודה ${decWords}` : intWords;
+    }
+
     // חישוב ערכים דינמיים
     function processValue(val) {
         const now = new Date();
@@ -141,11 +153,10 @@
 
         let text = getText(target);
 
-        // 1. בדיקת תבנית של מספר מוקף בסלאשים (למשל: /1499/)
-        const numMatch = text.match(/\/(\d+)\//);
+        // 1. בדיקת תבנית של מספר (שלם או עשרוני) מוקף בסלאשים (למשל: /1454.55/)
+        const numMatch = text.match(/\/(\d+(?:\.\d+)?)\//);
         if (numMatch) {
-            const num = parseInt(numMatch[1], 10);
-            const words = numberToWordsHebrew(num);
+            const words = numberToWordsHebrewWithDecimals(numMatch[1]);
             if (words) {
                 replaceInElement(target, numMatch[0], words);
                 return;
@@ -181,11 +192,10 @@
 
         let text = getText(target);
 
-        // בדיקת מספר ללא סלאש בסוף (למשל /1499 ואז רווח)
-        const numMatch = text.match(/\/(\d+)$/);
+        // בדיקת מספר ללא סלאש בסוף (למשל /1454.55 ואז רווח)
+        const numMatch = text.match(/\/(\d+(?:\.\d+)?)$/);
         if (numMatch) {
-            const num = parseInt(numMatch[1], 10);
-            const words = numberToWordsHebrew(num);
+            const words = numberToWordsHebrewWithDecimals(numMatch[1]);
             if (words) {
                 e.preventDefault();
                 replaceInElement(target, numMatch[0], words + (e.key === ' ' ? ' ' : ''));
@@ -236,10 +246,9 @@
         if (lastSlash !== -1 && (lastSlash === text.length - 1 || !text.slice(lastSlash).includes(' '))) {
             const query = text.slice(lastSlash + 1).toLowerCase();
             
-            // אם מקלידים מספר - מציגים תצוגה מקדימה של המילים
-            if (/^\d+$/.test(query)) {
-                const num = parseInt(query, 10);
-                const words = numberToWordsHebrew(num);
+            // אם מקלידים מספר (שלם או עשרוני) - מציגים תצוגה מקדימה של המילים
+            if (/^\d+(\.\d*)?$/.test(query)) {
+                const words = numberToWordsHebrewWithDecimals(query);
                 if (words) {
                     showAutoComplete(target, [[`/${query}/`, words]], '/' + query);
                     return;
