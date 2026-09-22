@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pro Emoji & Text Shortcuts Replacer
 // @namespace    http://tampermonkey.net/
-// @version      2.4
-// @description  החלפת קיצורים לאימוג'ים, המרת מספרים למילים (כולל עשרוניים), תפריט סינון בזמן אמת ותמיכה מורחבת בעורכי טקסט
+// @version      2.5
+// @description  החלפת קיצורים לאימוג'ים, המרת מספרים למילים (כולל עשרוניים), תמיכה מלאה ב-Gemini ועורכים מתקדמים
 // @author       You
 // @match        *://*/*
 // @grant        GM_getValue
@@ -50,11 +50,8 @@
                 } else {
                     let t = Math.floor(rem / 10);
                     let u = rem % 10;
-                    if (u > 0) {
-                        parts.push(tens[t] + " ו" + units[u]);
-                    } else {
-                        parts.push(tens[t]);
-                    }
+                    if (u > 0) parts.push(tens[t] + " ו" + units[u]);
+                    else parts.push(tens[t]);
                 }
             }
 
@@ -76,9 +73,7 @@
 
         if (remainder > 0) {
             let remStr = convertGroup(remainder);
-            if (thousands > 0 && !remStr.startsWith("ו")) {
-                remStr = "ו" + remStr;
-            }
+            if (thousands > 0 && !remStr.startsWith("ו")) remStr = "ו" + remStr;
             result.push(remStr);
         }
 
@@ -101,48 +96,44 @@
         return val;
     }
 
-    function isInputTarget(target) {
-        return target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true');
-    }
-
     function getText(element) {
-        return element.isContentEditable || element.getAttribute('contenteditable') === 'true' ? element.innerText : element.value;
+        if (!element) return '';
+        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+            return element.value;
+        }
+        return element.innerText || element.textContent || '';
     }
 
     function replaceInElement(element, search, replace) {
-        if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
-            element.focus();
-            const text = element.innerText;
-            if (text.includes(search)) {
-                element.innerText = text.replace(search, replace);
-                // הזזת הסמן לסוף הטקסט
-                const range = document.createRange();
-                const sel = window.getSelection();
-                range.selectNodeContents(element);
-                range.collapse(false);
-                sel.removeAllRanges();
-                sel.addRange(range);
-            }
-        } else {
+        if (!element) return;
+        
+        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
             const start = element.selectionStart;
             const end = element.selectionEnd;
-            const val = element.value;
-            element.value = val.replace(search, replace);
+            element.value = element.value.replace(search, replace);
             element.setSelectionRange(start, end);
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            // טיפול בעורכים עשירים (Rich Text / contentEditable)
+            let html = element.innerHTML;
+            if (html.includes(search)) {
+                document.execCommand('insertText', false, replace);
+                // נפילה חלופית אם execCommand חסום
+                if (element.innerText.includes(search)) {
+                    element.innerText = element.innerText.replace(search, replace);
+                }
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+            }
         }
     }
 
-    document.addEventListener('input', function(e) {
-        if (!isEnabled()) return;
-        const target = e.target;
-        if (!isInputTarget(target)) return;
-
+    function processTextCheck(target) {
+        if (!isEnabled() || !target) return;
+        
         let text = getText(target);
         if (!text) return;
 
-        console.log('[EmojiScript] Input detected:', text);
-
-        // בדיקת מספר עשרוני/שלם
+        // 1. המרת מספר עשרוני/שלם
         const numMatch = text.match(/\/(\d+(?:\.\d+)?)\//);
         if (numMatch) {
             const words = numberToWordsHebrewWithDecimals(numMatch[1]);
@@ -153,15 +144,14 @@
             }
         }
 
-        // בדיקת תפריט בחירה
+        // 2. תפריט בחירה
         if (text.includes('/בחירה/')) {
-            console.log('[EmojiScript] Opening selection menu');
             replaceInElement(target, '/בחירה/', '');
             openSelectionMenu(target);
             return;
         }
 
-        // בדיקת קיצורים רגילים
+        // 3. קיצורים רגילים
         const emojiMap = getEmojiMap();
         for (const [shortcut, emoji] of Object.entries(emojiMap)) {
             if (text.includes(shortcut)) {
@@ -172,40 +162,11 @@
         }
 
         handleAutoComplete(target, text);
-    }, true);
+    }
 
-    document.addEventListener('keydown', function(e) {
-        if (!isEnabled()) return;
-        if (e.key !== ' ' && e.key !== 'Enter') return;
-
-        const target = e.target;
-        if (!isInputTarget(target)) return;
-
-        let text = getText(target);
-        if (!text) return;
-
-        const numMatch = text.match(/\/(\d+(?:\.\d+)?)$/);
-        if (numMatch) {
-            const words = numberToWordsHebrewWithDecimals(numMatch[1]);
-            if (words) {
-                e.preventDefault();
-                replaceInElement(target, numMatch[0], words + (e.key === ' ' ? ' ' : ''));
-                closeAutoComplete();
-                return;
-            }
-        }
-
-        const emojiMap = getEmojiMap();
-        for (const [shortcut, emoji] of Object.entries(emojiMap)) {
-            const cleanShortcut = shortcut.replace(/\/$/,'');
-            if (text.endsWith(cleanShortcut)) {
-                e.preventDefault();
-                replaceInElement(target, cleanShortcut, processValue(emoji) + (e.key === ' ' ? ' ' : ''));
-                closeAutoComplete();
-                break;
-            }
-        }
-    }, true);
+    // הוספת האזנה גלובלית ברמת ה-Window עם capture phase
+    window.addEventListener('input', (e) => processTextCheck(e.target), true);
+    window.addEventListener('keyup', (e) => processTextCheck(e.target), true);
 
     let autoMenu = null;
 
@@ -254,8 +215,8 @@
         `;
 
         const rect = target.getBoundingClientRect();
-        autoMenu.style.top = (rect.bottom + 5) + 'px';
-        autoMenu.style.left = rect.left + 'px';
+        autoMenu.style.top = (rect.bottom > 0 ? rect.bottom + 5 : 100) + 'px';
+        autoMenu.style.left = (rect.left > 0 ? rect.left : 100) + 'px';
 
         matches.slice(0, 8).forEach(([shortcut, emoji]) => {
             const item = document.createElement('div');
