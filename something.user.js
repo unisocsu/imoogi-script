@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pro Emoji & Text Shortcuts Replacer
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  החלפת קיצורים לאימוג'ים, תפריט סינון בזמן אמת, טקסטים דינמיים, חיפוש בהגדרות וסגירה בלחיצה בחוץ
+// @version      2.2
+// @description  החלפת קיצורים לאימוג'ים, המרת מספרים למילים, תפריט סינון בזמן אמת, טקסטים דינמיים וחיפוש בהגדרות
 // @author       You
 // @match        *://*/*
 // @grant        GM_getValue
@@ -61,6 +61,68 @@
         GM_setValue("scriptEnabled", val);
     }
 
+    // -------------------------------------------------------------
+    // המרת מספרים למילים בעברית (עד 999,999)
+    // -------------------------------------------------------------
+    function numberToWordsHebrew(num) {
+        if (num === 0) return "אפס";
+        if (isNaN(num) || num < 0 || num > 999999) return null;
+
+        const units = ["", "אחד", "שניים", "שלושה", "ארבעה", "חמישה", "שישה", "שבעה", "שמונה", "תשעה"];
+        const teens = ["עשר", "אחד עשר", "שניים עשר", "שלושה עשר", "ארבעה עשר", "חמישה עשר", "שישה עשר", "שבעה עשר", "שמונה עשר", "תשעה עשר"];
+        const tens = ["", "", "עשרים", "שלושים", "ארבעים", "חמישים", "שישים", "שבעים", "שמונים", "תשעים"];
+        const hundreds = ["", "מאה", "מאתיים", "שלוש מאות", "ארבע מאות", "חמש מאות", "שש מאות", "שבע מאות", "שמונה מאות", "תשע מאות"];
+
+        function convertGroup(n) {
+            let parts = [];
+            let h = Math.floor(n / 100);
+            let rem = n % 100;
+
+            if (h > 0) parts.push(hundreds[h]);
+
+            if (rem > 0) {
+                if (rem < 10) {
+                    parts.push(units[rem]);
+                } else if (rem < 20) {
+                    parts.push(teens[rem - 10]);
+                } else {
+                    let t = Math.floor(rem / 10);
+                    let u = rem % 10;
+                    if (u > 0) {
+                        parts.push(tens[t] + " ו" + units[u]);
+                    } else {
+                        parts.push(tens[t]);
+                    }
+                }
+            }
+
+            if (parts.length > 1 && !parts[parts.length - 1].startsWith("ו")) {
+                parts[parts.length - 1] = "ו" + parts[parts.length - 1];
+            }
+            return parts.join(" ");
+        }
+
+        let thousands = Math.floor(num / 1000);
+        let remainder = num % 1000;
+        let result = [];
+
+        if (thousands > 0) {
+            if (thousands === 1) result.push("אלף");
+            else if (thousands === 2) result.push("אלפיים");
+            else result.push(convertGroup(thousands) + " אלפים");
+        }
+
+        if (remainder > 0) {
+            let remStr = convertGroup(remainder);
+            if (thousands > 0 && !remStr.startsWith("ו")) {
+                remStr = "ו" + remStr;
+            }
+            result.push(remStr);
+        }
+
+        return result.join(" ");
+    }
+
     // חישוב ערכים דינמיים
     function processValue(val) {
         const now = new Date();
@@ -70,7 +132,7 @@
     }
 
     // -------------------------------------------------------------
-    // 1. החלפה בלחיצה על רווח / הקלדה
+    // 1. זיהוי והחלפת טקסט
     // -------------------------------------------------------------
     document.addEventListener('input', function(e) {
         if (!isEnabled()) return;
@@ -78,16 +140,27 @@
         if (!isInputTarget(target)) return;
 
         let text = getText(target);
-        const emojiMap = getEmojiMap();
 
-        // בדיקה עבור תפריט בחירה מלא
+        // 1. בדיקת תבנית של מספר מוקף בסלאשים (למשל: /1499/)
+        const numMatch = text.match(/\/(\d+)\//);
+        if (numMatch) {
+            const num = parseInt(numMatch[1], 10);
+            const words = numberToWordsHebrew(num);
+            if (words) {
+                replaceInElement(target, numMatch[0], words);
+                return;
+            }
+        }
+
+        // 2. בדיקה עבור תפריט בחירה מלא
         if (text.includes('/בחירה/')) {
             replaceInElement(target, '/בחירה/', '');
             openSelectionMenu(target);
             return;
         }
 
-        // בדיקת החלפות רגילות
+        // 3. בדיקת החלפות רגילות
+        const emojiMap = getEmojiMap();
         for (const [shortcut, emoji] of Object.entries(emojiMap)) {
             if (text.includes(shortcut)) {
                 replaceInElement(target, shortcut, processValue(emoji));
@@ -107,10 +180,23 @@
         if (!isInputTarget(target)) return;
 
         let text = getText(target);
-        const emojiMap = getEmojiMap();
 
+        // בדיקת מספר ללא סלאש בסוף (למשל /1499 ואז רווח)
+        const numMatch = text.match(/\/(\d+)$/);
+        if (numMatch) {
+            const num = parseInt(numMatch[1], 10);
+            const words = numberToWordsHebrew(num);
+            if (words) {
+                e.preventDefault();
+                replaceInElement(target, numMatch[0], words + (e.key === ' ' ? ' ' : ''));
+                closeAutoComplete();
+                return;
+            }
+        }
+
+        const emojiMap = getEmojiMap();
         for (const [shortcut, emoji] of Object.entries(emojiMap)) {
-            const cleanShortcut = shortcut.replace(/\/$/,''); // בדיקה גם ללא סלאש בסוף
+            const cleanShortcut = shortcut.replace(/\/$/,'');
             if (text.endsWith(cleanShortcut)) {
                 e.preventDefault();
                 replaceInElement(target, cleanShortcut, processValue(emoji) + (e.key === ' ' ? ' ' : ''));
@@ -147,8 +233,19 @@
 
     function handleAutoComplete(target, text) {
         const lastSlash = text.lastIndexOf('/');
-        if (lastSlash !== -1 && lastSlash === text.length - 1 || (lastSlash !== -1 && !text.slice(lastSlash).includes(' '))) {
+        if (lastSlash !== -1 && (lastSlash === text.length - 1 || !text.slice(lastSlash).includes(' '))) {
             const query = text.slice(lastSlash + 1).toLowerCase();
+            
+            // אם מקלידים מספר - מציגים תצוגה מקדימה של המילים
+            if (/^\d+$/.test(query)) {
+                const num = parseInt(query, 10);
+                const words = numberToWordsHebrew(num);
+                if (words) {
+                    showAutoComplete(target, [[`/${query}/`, words]], '/' + query);
+                    return;
+                }
+            }
+
             if (query.length > 0) {
                 const map = getEmojiMap();
                 const matches = Object.entries(map).filter(([k]) => k.toLowerCase().includes(query) && k !== '/בחירה/');
@@ -270,7 +367,6 @@
 
         container.appendChild(menu);
 
-        // סגירה בלחיצה מחוץ לחלונית
         container.onclick = function(e) {
             if (e.target === container) {
                 container.remove();
@@ -379,7 +475,6 @@
 
         overlay.appendChild(modal);
 
-        // סגירה בלחיצה מחוץ לחלונית ההגדרות
         overlay.onclick = function(e) {
             if (e.target === overlay) {
                 overlay.remove();
@@ -437,7 +532,6 @@
             }
         };
 
-        // ייצוא בלחיצה
         document.getElementById('export-btn').onclick = function() {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(getEmojiMap(), null, 2));
             const downloadAnchor = document.createElement('a');
@@ -448,7 +542,6 @@
             downloadAnchor.remove();
         };
 
-        // ייבוא בלחיצה
         document.getElementById('import-btn').onclick = () => document.getElementById('import-file').click();
         document.getElementById('import-file').onchange = function(e) {
             const file = e.target.files[0];
