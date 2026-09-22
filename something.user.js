@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pro Emoji & Text Shortcuts Replacer
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  החלפת קיצורים לאימוג'ים, תפריט סינון בזמן אמת, טקסטים דינמיים וייצוא/ייבוא הגדרות
+// @version      2.1
+// @description  החלפת קיצורים לאימוג'ים, תפריט סינון בזמן אמת, טקסטים דינמיים, חיפוש בהגדרות וסגירה בלחיצה בחוץ
 // @author       You
 // @match        *://*/*
 // @grant        GM_getValue
@@ -209,16 +209,22 @@
     // 3. תפריט בחירה צף (/בחירה/)
     // -------------------------------------------------------------
     function openSelectionMenu(activeInput) {
-        const existing = document.getElementById('emoji-select-menu');
-        if (existing) existing.remove();
+        const existingContainer = document.getElementById('emoji-select-container');
+        if (existingContainer) existingContainer.remove();
+
+        const container = document.createElement('div');
+        container.id = 'emoji-select-container';
+        container.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.2);
+            z-index: 999998;
+            display: flex; align-items: center; justify-content: center;
+        `;
 
         const menu = document.createElement('div');
         menu.id = 'emoji-select-menu';
         menu.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
             background: #fff;
             border: 1px solid #ccc;
             border-radius: 8px;
@@ -251,7 +257,7 @@
             `;
             btn.onclick = function() {
                 insertAtCaret(activeInput, displayVal);
-                menu.remove();
+                container.remove();
             };
             menu.appendChild(btn);
         });
@@ -259,10 +265,19 @@
         const closeBtn = document.createElement('button');
         closeBtn.innerText = 'סגור';
         closeBtn.style.cssText = 'grid-column: span 6; padding: 6px; cursor: pointer; margin-top: 5px;';
-        closeBtn.onclick = () => menu.remove();
+        closeBtn.onclick = () => container.remove();
         menu.appendChild(closeBtn);
 
-        document.body.appendChild(menu);
+        container.appendChild(menu);
+
+        // סגירה בלחיצה מחוץ לחלונית
+        container.onclick = function(e) {
+            if (e.target === container) {
+                container.remove();
+            }
+        };
+
+        document.body.appendChild(container);
     }
 
     function insertAtCaret(element, text) {
@@ -309,16 +324,22 @@
     }
 
     function openSettingsModal() {
-        const existing = document.getElementById('emoji-settings-modal');
-        if (existing) existing.remove();
+        const existingOverlay = document.getElementById('emoji-settings-overlay');
+        if (existingOverlay) existingOverlay.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'emoji-settings-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.3);
+            z-index: 999998;
+            display: flex; align-items: center; justify-content: center;
+        `;
 
         const modal = document.createElement('div');
         modal.id = 'emoji-settings-modal';
         modal.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
             background: #fff;
             border: 1px solid #888;
             border-radius: 8px;
@@ -346,6 +367,7 @@
             </div>
             <hr>
             <h4 style="margin: 8px 0;">קיצורים קיימים</h4>
+            <input type="text" id="search-shortcuts" placeholder="חפש ברשימה..." style="width: 100%; padding: 4px; margin-bottom: 6px; box-sizing: border-box;">
             <div id="shortcuts-list" style="max-height: 140px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #eee; padding: 5px;"></div>
             <div style="display:flex; gap: 5px; margin-bottom: 10px;">
                 <button id="export-btn" style="width: 50%; padding: 5px; cursor:pointer;">ייצא גיבוי (JSON)</button>
@@ -355,16 +377,28 @@
             <button id="close-settings" style="width: 100%; padding: 8px; cursor: pointer;">סגור</button>
         `;
 
-        document.body.appendChild(modal);
+        overlay.appendChild(modal);
+
+        // סגירה בלחיצה מחוץ לחלונית ההגדרות
+        overlay.onclick = function(e) {
+            if (e.target === overlay) {
+                overlay.remove();
+            }
+        };
+
+        document.body.appendChild(overlay);
 
         document.getElementById('toggle-script').onchange = (e) => setEnabled(e.target.checked);
 
-        function renderList() {
+        function renderList(filter = '') {
             const listDiv = document.getElementById('shortcuts-list');
             listDiv.innerHTML = '';
             const map = getEmojiMap();
 
             for (const [key, val] of Object.entries(map)) {
+                if (filter && !key.toLowerCase().includes(filter.toLowerCase()) && !val.includes(filter)) {
+                    continue;
+                }
                 const row = document.createElement('div');
                 row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; border-bottom: 1px dashed #ddd; padding-bottom: 2px;';
                 row.innerHTML = `
@@ -374,13 +408,17 @@
                 row.querySelector('button').onclick = function() {
                     delete map[key];
                     setEmojiMap(map);
-                    renderList();
+                    renderList(document.getElementById('search-shortcuts').value.trim());
                 };
                 listDiv.appendChild(row);
             }
         }
 
         renderList();
+
+        document.getElementById('search-shortcuts').oninput = function(e) {
+            renderList(e.target.value.trim());
+        };
 
         document.getElementById('add-btn').onclick = function() {
             let shortcut = document.getElementById('new-shortcut').value.trim();
@@ -393,7 +431,7 @@
                 const map = getEmojiMap();
                 map[shortcut] = emoji;
                 setEmojiMap(map);
-                renderList();
+                renderList(document.getElementById('search-shortcuts').value.trim());
                 document.getElementById('new-shortcut').value = '';
                 document.getElementById('new-emoji').value = '';
             }
@@ -429,7 +467,7 @@
             reader.readAsText(file);
         };
 
-        document.getElementById('close-settings').onclick = () => modal.remove();
+        document.getElementById('close-settings').onclick = () => overlay.remove();
     }
 
     createSettingsButton();
