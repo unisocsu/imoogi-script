@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pro Emoji & Text Shortcuts Replacer
 // @namespace    http://tampermonkey.net/
-// @version      2.5
+// @version      2.6
 // @description  החלפת קיצורים לאימוג'ים, המרת מספרים למילים (כולל עשרוניים), תמיכה מלאה ב-Gemini ועורכים מתקדמים
 // @author       You
 // @match        *://*/*
@@ -13,11 +13,11 @@
     'use strict';
 
     const defaultEmojis = {
-        "/מצחיק/": "😊", "/חיוך/": "😃", "/צוחק/": "😂", "/בוכה/": "😭",
-        "/מאוהב/": "😍", "/משקפיים/": "😎", "/עצוב/": "😢", "/כועס/": "😡",
-        "/לייק/": "👍", "/בוז/": "👎", "/תודה/": "🙏", "/כפיים/": "👏",
-        "/לב/": "❤️", "/אש/": "🔥", "/כוכב/": "⭐", "/וי/": "✅", "/איקס/": "❌",
-        "/תאריך/": "DYNAMIC_DATE", "/שעה/": "DYNAMIC_TIME"
+        "😊": "😊", "😃": "😃", "😂": "😂", "😭": "😭",
+        "😍": "😍", "/משקפיים/": "😎", "😢": "😢", "😡": "😡",
+        "👍": "👍", "👎": "👎", "🙏": "🙏", "👏": "👏",
+        "❤️": "❤️", "🔥": "🔥", "⭐": "⭐", "✅": "✅", "❌": "❌",
+        "23.9.2026": "DYNAMIC_DATE", "16:23": "DYNAMIC_TIME"
     };
 
     function getEmojiMap() { return GM_getValue("emojiMap", defaultEmojis); }
@@ -114,12 +114,10 @@
             element.setSelectionRange(start, end);
             element.dispatchEvent(new Event('input', { bubbles: true }));
         } else {
-            // טיפול בעורכים עשירים (Rich Text / contentEditable)
             let html = element.innerHTML;
             if (html.includes(search)) {
                 document.execCommand('insertText', false, replace);
-                // נפילה חלופית אם execCommand חסום
-                if (element.innerText.includes(search)) {
+                if (element.innerText && element.innerText.includes(search)) {
                     element.innerText = element.innerText.replace(search, replace);
                 }
                 element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -145,8 +143,8 @@
         }
 
         // 2. תפריט בחירה
-        if (text.includes('/בחירה/')) {
-            replaceInElement(target, '/בחירה/', '');
+        if (text.includes('')) {
+            replaceInElement(target, '', '');
             openSelectionMenu(target);
             return;
         }
@@ -164,7 +162,6 @@
         handleAutoComplete(target, text);
     }
 
-    // הוספת האזנה גלובלית ברמת ה-Window עם capture phase
     window.addEventListener('input', (e) => processTextCheck(e.target), true);
     window.addEventListener('keyup', (e) => processTextCheck(e.target), true);
 
@@ -185,7 +182,7 @@
 
             if (query.length > 0) {
                 const map = getEmojiMap();
-                const matches = Object.entries(map).filter(([k]) => k.toLowerCase().includes(query) && k !== '/בחירה/');
+                const matches = Object.entries(map).filter(([k]) => k.toLowerCase().includes(query) && k !== '');
                 if (matches.length > 0) {
                     showAutoComplete(target, matches, '/' + query);
                     return;
@@ -215,8 +212,15 @@
         `;
 
         const rect = target.getBoundingClientRect();
-        autoMenu.style.top = (rect.bottom > 0 ? rect.bottom + 5 : 100) + 'px';
-        autoMenu.style.left = (rect.left > 0 ? rect.left : 100) + 'px';
+        const windowHeight = window.innerHeight;
+        
+        let topPos = rect.bottom + 5;
+        if (topPos + 180 > windowHeight) {
+            topPos = Math.max(10, rect.top - 185);
+        }
+
+        autoMenu.style.top = topPos + 'px';
+        autoMenu.style.left = Math.max(10, rect.left) + 'px';
 
         matches.slice(0, 8).forEach(([shortcut, emoji]) => {
             const item = document.createElement('div');
@@ -272,7 +276,7 @@
 
         const emojiMap = getEmojiMap();
         Object.entries(emojiMap).forEach(([key, value]) => {
-            if (key === '/בחירה/') return;
+            if (key === '') return;
             const btn = document.createElement('button');
             const displayVal = processValue(value);
             btn.innerText = displayVal;
